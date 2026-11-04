@@ -1,11 +1,11 @@
 // Offline support: network-first (so updates show up right away), falling back to cache
 // when the practice room has no Wi-Fi.
-const CACHE = 'practice-room-v2';
+const CACHE = 'practice-room-v3';
 const CORE = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
   'js/app.js', 'js/audio.js', 'js/ui.js', 'js/store.js', 'js/pitch.js', 'js/tuner.js', 'js/drums.js',
   'js/metronome.js', 'js/synth.js', 'js/chords.js', 'js/backing.js', 'js/recorder.js', 'js/aweight.js',
-  'js/dbmeter.js', 'js/breathe.js', 'js/quotes.js', 'js/session.js', 'js/health.js', 'js/concerts.js', 'js/report.js',
+  'js/dbmeter.js', 'js/breathe.js', 'js/nav.js', 'js/quotes.js', 'js/session.js', 'js/health.js', 'js/concerts.js', 'js/report.js',
   'data/concerts.json',
 ];
 self.addEventListener('install', (e) => {

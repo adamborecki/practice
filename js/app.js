@@ -10,6 +10,7 @@ import { report } from './report.js';
 import { breathe } from './breathe.js';
 import { $, $$, esc, icon, toast } from './ui.js';
 import { load, save, daysAgoKey } from './store.js';
+import { track, tabFor, renderCrumbs, maybeWelcome, startTour } from './nav.js';
 
 const more = {
   id: 'more',
@@ -25,9 +26,10 @@ const more = {
       </nav>
       <div class="card about">
         <h2>About</h2>
-        <p>Practice Room is a free practice companion for Chapman musicians. Everything — your log, notes and recordings — stays on this device; nothing is uploaded.</p>
+        <p>The Chapman Practice App is a free practice companion for Chapman musicians. Everything — your log, notes and recordings — stays on this device; nothing is uploaded.</p>
         <p><b>Install it:</b> in Safari tap Share → <i>Add to Home Screen</i>; in Chrome tap ⋮ → <i>Install app</i>. It then works offline in practice rooms with bad Wi-Fi.</p>
-        <p class="hint">Not an official Chapman University app. Health information is educational, not medical advice.</p>
+        <p class="hint">Created with Claude Code, with input from Chapman faculty. Health information is educational, not medical advice.</p>
+        <button class="btn small m-tour">Replay the tour</button>
       </div>
       <div class="card">
         <h2>Demo & data</h2>
@@ -36,12 +38,13 @@ const more = {
         <div class="chips"><button class="btn small m-export">Export backup</button><label class="btn small m-import">Import backup<input type="file" accept="application/json,.json" hidden></label></div>
         <div class="chips"><button class="btn small m-sample">Add sample week</button><button class="btn small m-unsample">Remove sample week</button><button class="btn small danger m-wipe">Erase all my data</button></div>
       </div>`;
+    $('.m-tour', root).addEventListener('click', startTour);
     $('.m-export', root).addEventListener('click', () => {
       const data = {};
       Object.keys(localStorage).filter((k) => k.startsWith('pr.')).forEach((k) => (data[k] = localStorage.getItem(k)));
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([JSON.stringify({ app: 'practice-room', version: 1, exported: new Date().toISOString(), data }, null, 1)], { type: 'application/json' }));
-      a.download = `practice-room-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `chapman-practice-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     });
@@ -50,7 +53,7 @@ const more = {
       if (!f) return;
       try {
         const j = JSON.parse(await f.text());
-        if (j.app !== 'practice-room' || typeof j.data !== 'object') throw new Error('not a Practice Room backup');
+        if (j.app !== 'practice-room' || typeof j.data !== 'object') throw new Error('not a Chapman Practice App backup');
         if (!confirm('Replace this device’s log, notes and settings with the backup?')) return;
         Object.keys(localStorage).filter((k) => k.startsWith('pr.')).forEach((k) => localStorage.removeItem(k));
         Object.entries(j.data).forEach(([k, v]) => { if (k.startsWith('pr.') && typeof v === 'string') localStorage.setItem(k, v); });
@@ -105,7 +108,6 @@ function addSampleWeek() {
 }
 
 const VIEWS = { today, tuner, beats: metronome, jam: backing, record: recorder, db: dbmeter, health, concerts, report, breathe, more };
-const NAV_OF = { db: 'more', health: 'more', concerts: 'more', report: 'more', breathe: 'more' };
 const mounted = new Set();
 let current = null;
 
@@ -113,10 +115,12 @@ function route() {
   const id = (location.hash.slice(1) || 'today').split('?')[0];
   const key = VIEWS[id] ? id : 'today';
   if (current === key) return;
+  const prev = current;
   if (current) {
     VIEWS[current].hide?.();
     $(`#v-${current}`).hidden = true;
   }
+  const nav = track(prev, key);
   let sec = $(`#v-${key}`);
   if (!sec) {
     sec = document.createElement('section');
@@ -131,10 +135,13 @@ function route() {
   sec.hidden = false;
   VIEWS[key].show?.();
   current = key;
-  const navKey = NAV_OF[key] || key;
+  const navKey = tabFor(key);
   $$('.tabbar a').forEach((a) => a.setAttribute('aria-current', a.dataset.nav === navKey ? 'page' : 'false'));
-  window.scrollTo(0, 0);
-  document.title = key === 'today' ? 'Practice Room' : `${sec.querySelector('h1')?.textContent || ''} · Practice Room`;
+  renderCrumbs(key, nav.parent);
+  document.body.classList.toggle('has-crumbs', !!nav.parent);
+  // returning to a screen puts you back where you were on it
+  requestAnimationFrame(() => window.scrollTo(0, nav.scroll));
+  document.title = key === 'today' ? 'The Chapman Practice App' : `${sec.querySelector('h1')?.textContent || ''} · Chapman Practice`;
 }
 
 // "Now playing" pill: metronome / drone / backing track keep going while you switch screens
@@ -151,6 +158,7 @@ window.addEventListener('pr:playing', (e) => {
 
 window.addEventListener('hashchange', route);
 route();
+maybeWelcome(startTour);
 
 // Offline support
 if ('serviceWorker' in navigator && location.protocol === 'https:') {

@@ -4,7 +4,7 @@ import { chime, getCtx } from './audio.js';
 import { load, save, addLog, getLog, todayKey, daysAgoKey } from './store.js';
 import { quoteForDate } from './quotes.js';
 import { $, $$, esc, fmtClock, fmtMinutes, keepAwake, toast, icon } from './ui.js';
-import { nextConcerts } from './concerts.js';
+import { comingUp, focusConcert } from './concerts.js';
 import { tipOfTheDay } from './health.js';
 
 export const CATS = {
@@ -629,12 +629,31 @@ function renderTip() {
 function renderNextConcert() {
   const box = el && $('.next-concert', el);
   if (!box) return;
-  nextConcerts(2).then((list) => {
-    if (!list.length) { box.innerHTML = `<h2>${icon('calendar')} Concerts</h2><p class="hint">No upcoming concerts listed. <a href="#concerts">See calendar →</a></p>`; return; }
-    box.innerHTML = `<h2>${icon('calendar')} Coming up at Chapman</h2>` + list.map((e) => `
-      <a class="mini-event" href="#concerts">
-        <span class="me-date"><b>${e.d.toLocaleDateString([], { day: 'numeric' })}</b>${e.d.toLocaleDateString([], { month: 'short' })}</span>
-        <span><b>${esc(e.title)}</b><small>${e.d.toLocaleDateString([], { weekday: 'short' })} ${e.d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · ${esc(e.venue)}</small></span>
-      </a>`).join('');
+  comingUp(3).then(({ weekend, wk, next, total }) => {
+    const fmtDay = (d) => d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+    const time = (e) => (e.allDay ? 'All day' : e.d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+    const row = (e, showDate) => `
+      <a class="mini-event" href="#concerts" data-ev="${e.id}">
+        ${showDate ? `<span class="me-date"><b>${e.d.getDate()}</b>${e.d.toLocaleDateString([], { month: 'short' })}</span>` : `<span class="me-time">${time(e)}</span>`}
+        <span><b>${esc(e.title)}</b><small>${showDate ? `${e.d.toLocaleDateString([], { weekday: 'short' })} ${time(e)} · ` : ''}${esc(e.venue)}${e.category !== 'music' ? ` <span class="tag">${e.category}</span>` : ''}</small></span>
+      </a>`;
+    const lastDay = new Date(wk.end.getTime() - 864e5);
+    const range = `${wk.start.toLocaleDateString([], { month: 'short', day: 'numeric' })}–${lastDay.toLocaleDateString([], { month: wk.start.getMonth() === lastDay.getMonth() ? undefined : 'short', day: 'numeric' })}`;
+    let html = `<h2>${icon('calendar')} Coming up at Chapman</h2>`;
+    html += `<h3 class="mini-h">This weekend · ${range}</h3>`;
+    if (weekend.length) {
+      let day = '';
+      for (const e of weekend) {
+        const k = e.d.toDateString();
+        if (k !== day) { html += `<p class="mini-day">${fmtDay(e.d)}</p>`; day = k; }
+        html += row(e, false);
+      }
+    } else {
+      html += '<p class="hint">Nothing on the calendar this weekend.</p>';
+    }
+    if (next.length) html += `<h3 class="mini-h">Next up in music</h3>${next.map((e) => row(e, true)).join('')}`;
+    html += `<a class="btn wide" href="#concerts">See the full calendar${total ? ` (${total} events)` : ''} →</a>`;
+    box.innerHTML = html;
+    $$('[data-ev]', box).forEach((a) => a.addEventListener('click', (ev) => { ev.preventDefault(); focusConcert(a.dataset.ev); }));
   });
 }

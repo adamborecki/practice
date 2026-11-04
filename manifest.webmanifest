@@ -1,6 +1,6 @@
 {
-  "name": "Practice Room",
-  "short_name": "Practice",
+  "name": "The Chapman Practice App",
+  "short_name": "Chapman Practice",
   "description": "Tuner, groove metronome, backing tracks, recorder, dB meter and practice planner for Chapman musicians.",
   "start_url": "./#today",
   "scope": "./",

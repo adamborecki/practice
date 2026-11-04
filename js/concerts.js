@@ -33,7 +33,39 @@ export async function nextConcerts(n = 2) {
   return upcoming(d.events).filter((e) => e.category === 'music').slice(0, n);
 }
 
-const FILTERS = [['music', '🎵 Music'], ['all', 'All arts'], ['dance', 'Dance'], ['theatre', 'Theatre']];
+/**
+ * The upcoming weekend, Friday 00:00 → Monday 00:00 (local time).
+ * Mon–Thu: the coming weekend. Fri–Sun: the weekend we're in.
+ */
+export function weekendRange(now = new Date()) {
+  const dow = now.getDay(); // 0 Sun … 6 Sat
+  const offset = dow === 0 ? -2 : dow === 6 ? -1 : 5 - dow;
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 3);
+  return { start, end, current: dow === 0 || dow >= 5 };
+}
+
+/** Everything this weekend (all arts), what's next in music after it, and the total count. */
+export async function comingUp(nextCount = 3) {
+  const d = await fetchData();
+  const list = upcoming(d.events);
+  const wk = weekendRange();
+  const weekend = list.filter((e) => e.d >= wk.start && e.d < wk.end);
+  const after = list.filter((e) => e.d >= wk.end || (e.d < wk.start));
+  const next = after.filter((e) => e.category === 'music' && e.d >= wk.end).slice(0, nextCount);
+  // if there's music before the weekend (e.g. Thursday), lead with it
+  const before = list.filter((e) => e.d < wk.start && e.category === 'music');
+  return { weekend, wk, next: [...before, ...next].slice(0, nextCount), total: list.length, music: list.filter((e) => e.category === 'music').length };
+}
+
+let focusId = null;
+/** Open the Concerts screen scrolled to one event. */
+export function focusConcert(id) {
+  focusId = String(id);
+  location.hash = 'concerts';
+}
+
+const FILTERS = [['music', '🎵 Music'], ['weekend', '📅 This weekend'], ['all', 'All arts'], ['dance', 'Dance'], ['theatre', 'Theatre']];
 let el, filter = load('concertFilter', 'music'), saved = new Set(load('savedConcerts', []));
 
 export const concerts = {
@@ -53,18 +85,26 @@ export const concerts = {
     }));
     render();
   },
-  show() {},
+  show() { if (focusId && el) render(); },
   hide() {},
 };
 
 async function render() {
+  const fid = focusId;
+  focusId = null; // claim it now so a second render doesn't redo the jump
   const d = await fetchData();
   let list = upcoming(d.events);
+  if (fid && !list.some((e) => String(e.id) === fid && (filter === 'all' || (filter !== 'weekend' && filter !== 'saved' && e.category === filter)))) {
+    // make sure the event we're jumping to is visible
+    filter = 'all';
+    $$('[data-f]', el).forEach((x) => x.classList.toggle('on', x.dataset.f === 'all'));
+  }
   if (filter === 'saved') list = list.filter((e) => saved.has(e.id));
+  else if (filter === 'weekend') { const wk = weekendRange(); list = list.filter((e) => e.d >= wk.start && e.d < wk.end); }
   else if (filter !== 'all') list = list.filter((e) => e.category === filter);
   const box = $('.con-list', el);
   if (!list.length) {
-    box.innerHTML = `<p class="empty">${filter === 'saved' ? 'Star a concert to save it here.' : 'Nothing upcoming in this category right now.'}</p>`;
+    box.innerHTML = `<p class="empty">${filter === 'saved' ? 'Star a concert to save it here.' : filter === 'weekend' ? 'Nothing on the calendar this weekend.' : 'Nothing upcoming in this category right now.'}</p>`;
   } else {
     let month = '';
     box.innerHTML = list.map((e) => {
@@ -97,6 +137,16 @@ async function render() {
       });
     });
   }
+  if (fid) {
+    const card = $(`.event[data-id="${fid}"]`, el);
+    if (card) {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: card.getBoundingClientRect().top + window.scrollY - 80, behavior: 'smooth' });
+        card.classList.add('focus');
+        setTimeout(() => card.classList.remove('focus'), 2200);
+      });
+    }
+  }
   $('.con-src', el).innerHTML = `Source: <a href="https://events.chapman.edu/copa/" target="_blank" rel="noopener">events.chapman.edu/copa</a>${d.fetched ? ` · updated ${new Date(d.fetched).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}. Always confirm details on the official page.`;
 }
 
@@ -105,7 +155,7 @@ function downloadIcs(e) {
   const end = e.dEnd || new Date(e.d.getTime() + 2 * 3600e3);
   const escTxt = (s) => String(s || '').replace(/([,;\\])/g, '\\$1').replace(/\n/g, '\\n');
   const ics = [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Practice Room//Chapman Concerts//EN', 'BEGIN:VEVENT',
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//The Chapman Practice App//Chapman Concerts//EN', 'BEGIN:VEVENT',
     `UID:${e.id}@practice-room`, `DTSTAMP:${fmt(new Date())}`, `DTSTART:${fmt(e.d)}`, `DTEND:${fmt(end)}`,
     `SUMMARY:${escTxt(e.title)}`, `LOCATION:${escTxt(e.location)}`, `DESCRIPTION:${escTxt(`${e.description}\n${e.url}`)}`, `URL:${e.url}`,
     'END:VEVENT', 'END:VCALENDAR',

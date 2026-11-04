@@ -1,6 +1,8 @@
-# Practice Room
+# The Chapman Practice App
 
-A phone-first practice companion for Chapman musicians. Plain HTML/CSS/JS (ES modules), no build step, hosted on GitHub Pages. It works offline once installed to the home screen.
+A phone-first practice companion for Chapman musicians, created with Claude Code with input from Chapman faculty. Plain HTML/CSS/JS (ES modules), no build step, hosted on GitHub Pages at https://adamborecki.github.io/practice/. It works offline once installed to the home screen.
+
+On first launch a welcome screen offers a guided tour (**Show me around**) or **Jump right in**; the tour can be replayed from More. Sub-screens show a breadcrumb trail and a Back button that returns to where you were, scroll position included.
 
 | Screen | What it does |
 |---|---|
@@ -11,7 +13,7 @@ A phone-first practice companion for Chapman musicians. Plain HTML/CSS/JS (ES mo
 | **Record** | Takes saved on the device (IndexedDB), waveform, 0.5×–1.25× playback, a “needs work” listening checklist (intonation, rhythm, tone…), notes, favorites, share/download |
 | **Sound level** | A-weighted dB estimate (IEC 61672 filter), calibration, hearing-protection setting, NIOSH 85 dBA / 3 dB daily dose measured at the ear |
 | **Health** | Research summaries on practice, body, voice, hearing and mind, each with a numbered citation |
-| **Concerts** | Upcoming Chapman College of Performing Arts events, with filters, saved events and .ics export |
+| **Concerts** | Upcoming Chapman College of Performing Arts events. Today shows everything this weekend (grouped by day) plus what's next in music; the full calendar has Music / This weekend / All arts / Dance / Theatre / Saved filters and .ics export |
 | **Breathe** | Paced slow breathing (about 6 breaths a minute) before performances, with optional tone cues |
 | **Teacher report** | Weekly summary: time and practice mix, goals reached, focus, body check-ins, listening notes, metronome/ladder work, load warning, plus the student's goals and questions. It can be shared, printed to PDF, emailed or copied |
 
