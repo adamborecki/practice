@@ -62,7 +62,27 @@ export const PRESETS = [
   { name: 'Dorian vamp', text: 'ii7 V7' },
 ];
 
-const S = load('jam', { text: 'I V vi IV', key: 0, transpose: 0, style: 'pop', bpm: 100, countIn: true, mix: { drums: 0.8, bass: 0.85, chords: 0.75 }, mute: {} });
+const S = load('jam', { text: 'I V vi IV', key: 0, transpose: 0, style: 'pop', bpm: 100, countIn: 1, mix: { drums: 0.8, bass: 0.85, chords: 0.75 }, mute: {} });
+if (S.countIn === true) S.countIn = 1;
+if (S.countIn === false) S.countIn = 0;
+
+const COUNT_INS = [['0', 'No count-in'], ['1', '1 bar'], ['2', '2 bars'], ['classic', '2 bars, jazz style (1 – 2 – | 1 2 3 4)'], ['4', '4 bars']];
+
+/**
+ * Count-in clicks as [{ beat (in beats from start), label, accent }].
+ * "classic" is the band count-off: half-note pulses for a bar, then every beat.
+ */
+export function countInClicks(mode, beats) {
+  const out = [];
+  if (mode === 'classic' && beats % 2 === 0) {
+    for (let i = 0; i < beats; i += 2) out.push({ beat: i, label: i / 2 + 1, accent: i === 0 });
+    for (let i = 0; i < beats; i++) out.push({ beat: beats + i, label: i + 1, accent: i === 0 });
+    return out;
+  }
+  const bars = mode === 'classic' ? 2 : Number(mode) || 0;
+  for (let b = 0; b < bars; b++) for (let i = 0; i < beats; i++) out.push({ beat: b * beats + i, label: i + 1, accent: i === 0 });
+  return out;
+}
 
 let el, buses = null, playing = false, barIdx = 0, nextBarTime = 0, prog = { bars: [] }, prevVoicing = {}, lastBass = null, startedAt = 0, barCount = 0;
 const vis = [];
@@ -116,7 +136,7 @@ export const backing = {
             <button class="chip mute ${S.mute[p] ? '' : 'on'}" data-mute="${p}">${p[0].toUpperCase() + p.slice(1)}</button>
             <input type="range" min="0" max="1" step="0.01" value="${S.mix[p]}" data-mix="${p}" aria-label="${p} volume">
           </div>`).join('')}
-        <label class="switch"><input type="checkbox" class="jam-count" ${S.countIn ? 'checked' : ''}><span>One-bar count-in</span></label>
+        <label class="field inline"><span>Count-in</span><select class="jam-count">${COUNT_INS.map(([v, n]) => `<option value="${v}" ${String(S.countIn) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       </div>`;
 
     $('.jam-play', root).addEventListener('click', () => (playing ? stop() : start()));
@@ -145,7 +165,7 @@ export const backing = {
       b.classList.toggle('on', !S.mute[p]);
       persist(); applyMix();
     }));
-    $('.jam-count', root).addEventListener('change', (e) => { S.countIn = e.target.checked; persist(); });
+    $('.jam-count', root).addEventListener('change', (e) => { S.countIn = e.target.value === 'classic' ? 'classic' : Number(e.target.value); persist(); });
     reparse();
   },
   show() {},
@@ -216,14 +236,15 @@ function start() {
   nextBarTime = c.currentTime + 0.1;
   startedAt = Date.now();
   if (S.countIn) {
-    const style = STYLES[S.style];
-    const g = GROOVES[style.groove];
+    const g = GROOVES[STYLES[S.style].groove];
     const beatDur = 60 / S.bpm;
-    for (let i = 0; i < g.beats; i++) {
-      VOICES.wood(nextBarTime + i * beatDur, buses.drums, 0.9, i === 0);
-      vis.push({ t: nextBarTime + i * beatDur, count: g.beats - i });
+    const clicks = countInClicks(String(S.countIn), g.beats);
+    for (const k of clicks) {
+      VOICES.wood(nextBarTime + k.beat * beatDur, buses.drums, k.accent ? 1 : 0.8, k.accent);
+      vis.push({ t: nextBarTime + k.beat * beatDur, count: k.label });
     }
-    nextBarTime += g.beats * beatDur;
+    const bars = Math.ceil((clicks[clicks.length - 1]?.beat + 1 || 0) / g.beats);
+    nextBarTime += bars * g.beats * beatDur;
   }
   ticker.start();
   raf = requestAnimationFrame(drawVis);

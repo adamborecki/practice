@@ -1,6 +1,7 @@
 import { getCtx, getMaster, createTicker, LOOKAHEAD } from './audio.js';
 import { VOICES, GROOVES, DANCE_GROOVES, stepVel } from './drums.js';
 import { load, save, addLog } from './store.js';
+import { meterInfo, subsFor, defaultAccents, noteSvg, unitName, TS_PRESETS } from './meter.js';
 import { $, $$, keepAwake, setPlaying, icon, toast } from './ui.js';
 
 const S = load('metro', {
@@ -9,11 +10,24 @@ const S = load('metro', {
   gap: false, gapPlay: 2, gapMute: 2,
 });
 
-// Per-beat accent levels (2 = accent, 1 = normal, 0 = silent). Tap a dot to cycle.
+// Time signature: top number (S.beats) over bottom number (S.bottom). Compound meters
+// (6/8, 9/8, 12/8…) can be felt in the dotted beat ('big') or in every eighth ('small').
+S.bottom ||= 4;
+S.feel ||= 'big';
+S.subSimple ||= ({ 1: 'none', 2: 'e8', 3: 'trip', 4: 'x16' })[S.sub] || 'none';
+S.subCompound ||= 'c3';
+S.countIn ??= 0;
+const info = () => meterInfo(S.beats, S.bottom, S.feel);
+function currentSub(i = info()) {
+  const list = subsFor(i);
+  const id = i.big ? S.subCompound : S.subSimple;
+  return list.find((x) => x.id === id) || list[0];
+}
+
+// Per-pulse accent levels (2 = accent, 1 = normal, 0 = silent). Tap a dot to cycle.
 function accents() {
-  if (!Array.isArray(S.accents)) S.accents = [];
-  S.accents.length = Math.min(S.accents.length, S.beats);
-  while (S.accents.length < S.beats) S.accents.push(S.accents.length === 0 && S.accent !== false ? 2 : 1);
+  const i = info();
+  if (!Array.isArray(S.accents) || S.accents.length !== i.pulses) S.accents = defaultAccents(i);
   return S.accents;
 }
 // Accuracy ladder state (not persisted: per sitting)
@@ -23,7 +37,7 @@ Object.assign(S, { ladderN: S.ladderN || 3, ladderStep: S.ladderStep || 4, ladde
 const MARKINGS = [[40, 'Grave'], [60, 'Largo'], [66, 'Larghetto'], [76, 'Adagio'], [108, 'Andante'], [120, 'Moderato'], [156, 'Allegro'], [176, 'Vivace'], [200, 'Presto'], [999, 'Prestissimo']];
 const marking = (b) => MARKINGS.find(([max]) => b < max)[1];
 
-let el, out, running = false, nextTime = 0, step = 0, bar = 0, startedAt = 0, startBpm = 0;
+let el, out, running = false, nextTime = 0, step = 0, bar = 0, pulseIdx = 0, countLeft = 0, startedAt = 0, startBpm = 0;
 const visQueue = [];
 let raf = 0;
 const ticker = createTicker(schedule);
@@ -38,10 +52,10 @@ export const metronome = {
         <div class="metro-dots" aria-hidden="true"></div>
         <div class="metro-bpm-row">
           <button class="btn round" data-bpm="-1" aria-label="Slower">−</button>
-          <div class="metro-bpm"><output class="mb-num">${S.bpm}</output><span class="mb-unit">BPM</span><span class="mb-mark">${marking(S.bpm)}</span></div>
+          <div class="metro-bpm"><output class="mb-num">${S.bpm}</output><span class="mb-unit"><span class="mb-note"></span> BPM</span><span class="mb-mark">${marking(S.bpm)}</span></div>
           <button class="btn round" data-bpm="1" aria-label="Faster">+</button>
         </div>
-        <input type="range" class="mb-slider" min="30" max="260" value="${S.bpm}" aria-label="Tempo">
+        <input type="range" class="mb-slider" min="20" max="300" value="${S.bpm}" aria-label="Tempo">
         <div class="metro-actions">
           <button class="btn tap">Tap</button>
           <button class="btn primary big metro-play">${icon('play')}<span>Start</span></button>
@@ -62,22 +76,24 @@ export const metronome = {
       </div>
 
       <div class="card click-only">
-        <h2>Meter & sound</h2>
-        <div class="row2">
-          <label class="field"><span>Beats per bar</span>
-            <select class="m-beats">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => `<option ${n === S.beats ? 'selected' : ''}>${n}</option>`).join('')}</select>
-          </label>
-          <label class="field"><span>Subdivision</span>
-            <select class="m-sub">
-              <option value="1" ${S.sub === 1 ? 'selected' : ''}>♩ Quarter</option>
-              <option value="2" ${S.sub === 2 ? 'selected' : ''}>♫ Eighths</option>
-              <option value="3" ${S.sub === 3 ? 'selected' : ''}>Triplets</option>
-              <option value="4" ${S.sub === 4 ? 'selected' : ''}>16ths</option>
-            </select>
-          </label>
+        <h2>Time signature</h2>
+        <div class="ts-wrap">
+          <div class="ts-pick" aria-label="Time signature">
+            <select class="m-beats" aria-label="Beats per bar (top number)">${Array.from({ length: 16 }, (_, k) => k + 1).map((n) => `<option ${n === S.beats ? 'selected' : ''}>${n}</option>`).join('')}</select>
+            <span class="ts-line"></span>
+            <select class="m-bottom" aria-label="Note value (bottom number)">${[2, 4, 8, 16].map((n) => `<option ${n === S.bottom ? 'selected' : ''}>${n}</option>`).join('')}</select>
+          </div>
+          <div class="chips ts-presets">${TS_PRESETS.map(([t, b]) => `<button class="chip ts-chip" data-ts="${t}/${b}"><sup>${t}</sup>⁄<sub>${b}</sub></button>`).join('')}</div>
         </div>
+        <div class="m-feel" hidden>
+          <span class="q-label">Feel it in</span>
+          <div class="chips"><button class="chip" data-feel="big"></button><button class="chip" data-feel="small"></button></div>
+        </div>
+        <p class="hint m-meterhint"></p>
+        <label class="field"><span>Subdivision</span><select class="m-sub"></select></label>
         <div class="chips m-sounds">${[['wood', 'Woodblock'], ['click', 'Click'], ['beep', 'Beep'], ['cowbell', 'Cowbell 🐄']].map(([k, n]) => `<button class="chip ${S.sound === k ? 'on' : ''}" data-sound="${k}">${n}</button>`).join('')}</div>
-        <p class="hint">Tap the beat dots at the top to cycle <b>accent → normal → silent</b> — e.g. 7 beats as 2+2+3, or silence beats 1 &amp; 3 to hear only the backbeat.</p>
+        <label class="field inline"><span>Count-in</span><select class="m-count">${[[0, 'Off'], [1, '1 bar'], [2, '2 bars'], [4, '4 bars']].map(([v, n]) => `<option value="${v}" ${v === S.countIn ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <p class="hint">Tap the beat dots at the top to cycle <b>accent → normal → silent</b> — e.g. silence beats 1 &amp; 3 to hear only the backbeat.</p>
         <div class="chips m-groupings"></div>
       </div>
 
@@ -120,8 +136,12 @@ export const metronome = {
     $$('[data-mode]', root).forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
     $('.m-usebpm', root).addEventListener('click', () => S.mode !== 'click' && setBpm(GROOVES[S.mode].bpm));
     $('.m-clickover', root).addEventListener('change', (e) => { S.clickOnGroove = e.target.checked; persist(); });
-    $('.m-beats', root).addEventListener('change', (e) => { S.beats = Number(e.target.value); S.accents = null; persist(); drawDots(); renderGroupings(); });
-    $('.m-sub', root).addEventListener('change', (e) => { S.sub = Number(e.target.value); persist(); });
+    $('.m-beats', root).addEventListener('change', (e) => setMeter(Number(e.target.value), S.bottom));
+    $('.m-bottom', root).addEventListener('change', (e) => setMeter(S.beats, Number(e.target.value)));
+    $$('[data-ts]', root).forEach((b) => b.addEventListener('click', () => { const [t, n] = b.dataset.ts.split('/').map(Number); setMeter(t, n); }));
+    $$('[data-feel]', root).forEach((b) => b.addEventListener('click', () => setFeel(b.dataset.feel)));
+    $('.m-sub', root).addEventListener('change', (e) => { if (info().big) S.subCompound = e.target.value; else S.subSimple = e.target.value; persist(); });
+    $('.m-count', root).addEventListener('change', (e) => { S.countIn = Number(e.target.value); persist(); });
     $$('[data-sound]', root).forEach((b) => b.addEventListener('click', () => {
       S.sound = b.dataset.sound;
       $$('[data-sound]', root).forEach((x) => x.classList.toggle('on', x === b));
@@ -154,8 +174,7 @@ export const metronome = {
     $('.lad-step', root).addEventListener('change', (e) => { S.ladderStep = Number(e.target.value); persist(); });
     $('.lad-drop', root).addEventListener('change', (e) => { S.ladderDrop = e.target.value === '1'; persist(); });
     reflectMode();
-    drawDots();
-    renderGroupings();
+    renderMeter();
     renderLadder();
   },
   show() {},
@@ -177,23 +196,78 @@ function bus() {
 }
 
 function setBpm(b) {
-  S.bpm = Math.max(30, Math.min(260, Math.round(b)));
+  S.bpm = Math.max(20, Math.min(300, Math.round(b)));
   $('.mb-num', el).textContent = S.bpm;
   $('.mb-mark', el).textContent = marking(S.bpm);
   $('.mb-slider', el).value = S.bpm;
   persist();
-  if (running) setPlaying('metronome', `${S.bpm} BPM · ${S.mode === 'click' ? 'click' : GROOVES[S.mode].name}`, stop);
+  if (running) setPlaying('metronome', playingLabel(), stop);
 }
+
+const tsLabel = () => `${S.beats}/${S.bottom}`;
+const playingLabel = () => `${S.bpm} BPM · ${S.mode === 'click' ? tsLabel() : GROOVES[S.mode].name}`;
+
+function setMeter(top, bottom) {
+  const wasBig = info().big;
+  S.beats = top;
+  S.bottom = bottom;
+  S.accents = null;
+  // keep the felt tempo when moving between e.g. 3/4 and 6/8 counted in eighths
+  if (wasBig !== info().big && info().compound) S.feel = 'big';
+  persist();
+  renderMeter();
+  if (running) pulseIdx = 0;
+}
+
+function setFeel(f) {
+  if (S.feel === f) return;
+  // same music, different counting: three eighths per dotted beat
+  const factor = f === 'small' ? 3 : 1 / 3;
+  S.feel = f;
+  S.accents = null;
+  setBpm(S.bpm * factor);
+  persist();
+  renderMeter();
+  if (running) pulseIdx = 0;
+}
+
+function renderMeter() {
+  const i = info();
+  $('.m-beats', el).value = S.beats;
+  $('.m-bottom', el).value = S.bottom;
+  $$('[data-ts]', el).forEach((b) => b.classList.toggle('on', b.dataset.ts === tsLabel()));
+  const feel = $('.m-feel', el);
+  feel.hidden = !i.compound;
+  if (i.compound) {
+    const big = meterInfo(S.beats, S.bottom, 'big'), small = meterInfo(S.beats, S.bottom, 'small');
+    $('[data-feel=big]', el).innerHTML = `${big.pulses} ${noteSvg(big.unit.value, true)} beat${big.pulses > 1 ? 's' : ''}`;
+    $('[data-feel=small]', el).innerHTML = `${small.pulses} ${noteSvg(small.unit.value)}`;
+    $$('[data-feel]', el).forEach((b) => b.classList.toggle('on', b.dataset.feel === (i.big ? 'big' : 'small')));
+  }
+  $('.m-meterhint', el).innerHTML = `BPM counts the <b>${unitName(i.unit)}</b> — ${i.pulses} per bar.${i.compound && i.big ? ` Each beat divides into three ${NOTE_WORD[S.bottom] || 'notes'}.` : ''}`;
+  const sel = $('.m-sub', el);
+  const cur = currentSub(i);
+  const list = subsFor(i);
+  const groups = [...new Set(list.map((x) => x.group || ''))];
+  sel.innerHTML = groups.map((g) => {
+    const opts = list.filter((x) => (x.group || '') === g).map((x) => `<option value="${x.id}" ${x.id === cur.id ? 'selected' : ''}>${x.label}</option>`).join('');
+    return g ? `<optgroup label="${g === 'Even' ? 'Even divisions' : g}">${opts}</optgroup>` : opts;
+  }).join('');
+  $('.mb-note', el).innerHTML = S.mode === 'click' ? noteSvg(i.unit.value, i.unit.dotted) : noteSvg(4);
+  drawDots();
+  renderGroupings();
+}
+const NOTE_WORD = { 8: 'eighths', 16: 'sixteenths', 4: 'quarters' };
 
 function setMode(m) {
   S.mode = m;
   $$('[data-mode]', el).forEach((x) => x.classList.toggle('on', x.dataset.mode === m));
   persist();
   reflectMode();
-  drawDots();
+  renderMeter();
   if (running) {
-    step = 0; bar = 0; nextTime = getCtx().currentTime + 0.05;
-    setPlaying('metronome', `${S.bpm} BPM · ${S.mode === 'click' ? 'click' : GROOVES[S.mode].name}`, stop);
+    step = 0; bar = 0; pulseIdx = 0; nextTime = getCtx().currentTime + 0.05;
+    setPlaying('metronome', playingLabel(), stop);
   }
 }
 
@@ -203,7 +277,7 @@ function reflectMode() {
   $$('.click-only', el).forEach((x) => (x.hidden = groove));
 }
 
-const beatsPerBar = () => (S.mode === 'click' ? S.beats : GROOVES[S.mode].beats);
+const beatsPerBar = () => (S.mode === 'click' ? info().pulses : GROOVES[S.mode].beats);
 
 function drawDots() {
   const n = beatsPerBar();
@@ -217,7 +291,7 @@ function drawDots() {
 const GROUPINGS = { 5: [[3, 2], [2, 3]], 6: [[3, 3], [2, 2, 2]], 7: [[2, 2, 3], [3, 2, 2], [2, 3, 2]], 8: [[3, 3, 2], [4, 4]], 9: [[3, 3, 3], [2, 2, 2, 3]], 10: [[3, 3, 2, 2]], 11: [[3, 3, 3, 2], [2, 2, 3, 2, 2]], 12: [[3, 3, 3, 3]] };
 function renderGroupings() {
   const box = $('.m-groupings', el);
-  const g = GROUPINGS[S.beats] || [];
+  const g = info().big ? [] : GROUPINGS[S.beats] || [];
   box.innerHTML = g.length ? 'Groupings: ' + g.map((parts, i) => `<button class="chip" data-g="${i}">${parts.join('+')}</button>`).join('') : '';
   $$('[data-g]', box).forEach((b) => b.addEventListener('click', () => {
     const parts = g[Number(b.dataset.g)];
@@ -275,7 +349,9 @@ function start() {
   running = true;
   step = 0;
   bar = 0;
+  pulseIdx = 0;
   nextTime = c.currentTime + 0.08;
+  countLeft = S.countIn * beatsPerBar();
   startedAt = Date.now();
   startBpm = S.bpm;
   ticker.start();
@@ -284,7 +360,7 @@ function start() {
   const b = $('.metro-play', el);
   b.classList.add('active');
   b.innerHTML = `${icon('stop')}<span>Stop</span>`;
-  setPlaying('metronome', `${S.bpm} BPM · ${S.mode === 'click' ? 'click' : GROOVES[S.mode].name}`, stop);
+  setPlaying('metronome', playingLabel(), stop);
 }
 
 function stop() {
@@ -301,6 +377,7 @@ function stop() {
   out = null;
   keepAwake('metronome', false);
   $$('.metro-dots .dot', el).forEach((d) => d.classList.remove('on', 'muted'));
+  $('.metro-card', el).dataset.count = '';
   const b = $('.metro-play', el);
   b.classList.remove('active');
   b.innerHTML = `${icon('play')}<span>Start</span>`;
@@ -308,7 +385,7 @@ function stop() {
   setPlaying('metronome', null);
   const secs = Math.round((Date.now() - startedAt) / 1000);
   if (secs >= 30) {
-    const label = S.mode === 'click' ? 'Metronome' : `${GROOVES[S.mode].name} groove`;
+    const label = S.mode === 'click' ? `Metronome ${tsLabel()}` : `${GROOVES[S.mode].name} groove`;
     const range = startBpm !== S.bpm ? `${startBpm}→${S.bpm}` : `${S.bpm}`;
     addLog({ kind: 'metronome', label: `${label} @ ${range} BPM${L.climbs ? ` · ladder climbed ${L.climbs}×` : ''}`, seconds: secs, detail: { bpm: S.bpm, from: startBpm, ladderTop: L.best || null } });
   }
@@ -317,36 +394,46 @@ function stop() {
 function schedule() {
   if (!running) return;
   const c = getCtx();
-  const groove = S.mode === 'click' ? null : GROOVES[S.mode];
-  const beats = beatsPerBar();
-  const stepsPerBeat = groove ? groove.steps / groove.beats : S.sub;
-  const stepsPerBar = beats * stepsPerBeat;
+  // count-in: plain beat clicks (accent on each bar's downbeat), then the real thing
+  while (countLeft > 0 && nextTime < c.currentTime + LOOKAHEAD) {
+    const n = beatsPerBar();
+    const total = S.countIn * n;
+    const k = total - countLeft;
+    const beatDur = S.mode === 'click' ? 60 / S.bpm : (60 / S.bpm);
+    VOICES.wood(nextTime, bus(), k % n === 0 ? 1 : 0.8, k % n === 0);
+    visQueue.push({ t: nextTime, count: (k % n) + 1, beat: k % n, muted: false });
+    nextTime += beatDur;
+    countLeft--;
+  }
+  if (countLeft > 0) return;
+  if (S.mode === 'click') scheduleClick(c); else scheduleGroove(c);
+}
+
+function onBarLine() {
+  bar++;
+  // speed trainer bumps tempo on bar lines
+  if (S.trainer && bar % S.trainerBars === 0 && S.bpm < S.trainerTo) {
+    setBpm(Math.min(S.trainerTo, S.bpm + S.trainerStep));
+    if (S.bpm >= S.trainerTo) toast(`Speed trainer reached ${S.bpm} BPM 🎉`);
+  }
+}
+
+function scheduleClick(c) {
+  const i = info();
+  const sub = currentSub(i);
+  const acc = accents();
+  const snd = S.sound;
   while (nextTime < c.currentTime + LOOKAHEAD) {
-    const stepDur = 60 / S.bpm / stepsPerBeat;
-    const inBar = step % stepsPerBar;
-    const beat = Math.floor(inBar / stepsPerBeat);
-    const onBeat = inBar % stepsPerBeat === 0;
+    const p = pulseIdx % i.pulses;
+    const pulseDur = 60 / S.bpm;
     const muted = S.gap && (bar % (S.gapPlay + S.gapMute)) >= S.gapPlay;
-    let t = nextTime;
-    if (groove?.swing && inBar % 2 === 1) t += groove.swing * stepDur;
-    if (!muted) {
+    const lv = acc[p] ?? 1;
+    if (!muted && lv !== 0) {
       const dest = bus();
-      if (groove) {
-        for (const [voice, pattern] of Object.entries(groove.tracks)) {
-          const ch = pattern[inBar];
-          const v = stepVel(ch);
-          if (!v) continue;
-          VOICES[voice](t, dest, v);
-          if (ch === 'r') VOICES[voice](t + stepDur / 2, dest, v * 0.8);
-        }
-        if (S.clickOnGroove && onBeat) VOICES.wood(t, dest, 0.7, beat === 0);
-      } else {
-        const lv = accents()[beat] ?? 1;
-        const accent = lv === 2 && onBeat;
-        const snd = S.sound;
-        if (onBeat && lv === 0) {
-          // silent beat
-        } else if (onBeat) {
+      for (const f of sub.on) {
+        const t = nextTime + f * pulseDur;
+        if (f === 0) {
+          const accent = lv === 2;
           if (snd === 'cowbell') VOICES.cowbell(t, dest, accent ? 1 : 0.65);
           else VOICES[snd](t, dest, accent ? 1 : 0.85, accent);
         } else {
@@ -354,17 +441,40 @@ function schedule() {
         }
       }
     }
+    visQueue.push({ t: nextTime, beat: p, muted });
+    nextTime += pulseDur;
+    pulseIdx++;
+    if (pulseIdx % i.pulses === 0) onBarLine();
+  }
+}
+
+function scheduleGroove(c) {
+  const groove = GROOVES[S.mode];
+  const stepsPerBeat = groove.steps / groove.beats;
+  const stepsPerBar = groove.steps;
+  while (nextTime < c.currentTime + LOOKAHEAD) {
+    const stepDur = 60 / S.bpm / stepsPerBeat;
+    const inBar = step % stepsPerBar;
+    const beat = Math.floor(inBar / stepsPerBeat);
+    const onBeat = inBar % stepsPerBeat === 0;
+    const muted = S.gap && (bar % (S.gapPlay + S.gapMute)) >= S.gapPlay;
+    let t = nextTime;
+    if (groove.swing && inBar % 2 === 1) t += groove.swing * stepDur;
+    if (!muted) {
+      const dest = bus();
+      for (const [voice, pattern] of Object.entries(groove.tracks)) {
+        const ch = pattern[inBar];
+        const v = stepVel(ch);
+        if (!v) continue;
+        VOICES[voice](t, dest, v);
+        if (ch === 'r') VOICES[voice](t + stepDur / 2, dest, v * 0.8);
+      }
+      if (S.clickOnGroove && onBeat) VOICES.wood(t, dest, 0.7, beat === 0);
+    }
     if (onBeat) visQueue.push({ t, beat, muted });
     nextTime += stepDur;
     step++;
-    if (step % stepsPerBar === 0) {
-      bar++;
-      // speed trainer bumps tempo on bar lines
-      if (S.trainer && bar % S.trainerBars === 0 && S.bpm < S.trainerTo) {
-        setBpm(Math.min(S.trainerTo, S.bpm + S.trainerStep));
-        if (S.bpm >= S.trainerTo) toast(`Speed trainer reached ${S.bpm} BPM 🎉`);
-      }
-    }
+    if (step % stepsPerBar === 0) onBarLine();
   }
 }
 
@@ -375,6 +485,7 @@ function drawVis() {
   let latest = null;
   while (visQueue.length && visQueue[0].t <= now) latest = visQueue.shift();
   if (!latest) return;
+  $('.metro-card', el).dataset.count = latest.count || '';
   const dots = $$('.metro-dots .dot', el);
   dots.forEach((d, i) => {
     d.classList.toggle('on', i === latest.beat);

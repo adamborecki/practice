@@ -24,6 +24,10 @@ const more = {
         <a href="#report">${icon('report')}<span>Teacher report<small>Share your week</small></span></a>
         <a href="#breathe">${icon('heart')}<span>Breathe<small>Calm down before you perform</small></span></a>
       </nav>
+      <a class="card feedback-card" href="https://forms.gle/DyHYQ5VFw7SwZFXZ6" target="_blank" rel="noopener">
+        <span class="fb-ic" aria-hidden="true">💬</span>
+        <span><b>Bug reports &amp; feature requests</b><small>Something broken, or an idea? Tell us — opens a short Google Form ↗</small></span>
+      </a>
       <div class="card about">
         <h2>About</h2>
         <p>The Chapman Practice App is a free practice companion for Chapman musicians. Everything — your log, notes and recordings — stays on this device; nothing is uploaded.</p>
