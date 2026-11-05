@@ -17,6 +17,25 @@ S.feel ||= 'big';
 S.subSimple ||= ({ 1: 'none', 2: 'e8', 3: 'trip', 4: 'x16' })[S.sub] || 'none';
 S.subCompound ||= 'c3';
 S.countIn ??= 0;
+// Polyrhythm: S.poly evenly spaced clicks across each bar, against the beat.
+S.poly ??= 0;
+S.polyHear ||= 'both';
+// Tempo wiggle: the tempo drifts faster/slower so you have to listen and follow.
+S.wiggle ??= false;
+S.wigDepth ||= 6;
+S.wigBars ||= 8;
+S.wigShape ||= 'smooth';
+S.wigHide ??= false;
+const POLY_PRESETS = [[3, 2], [2, 3], [4, 3], [3, 4], [5, 4], [5, 3], [7, 4], [5, 2]];
+const polyVoice = () => (S.sound === 'beep' ? 'wood' : 'beep');
+
+/** Tempo multiplier at a position (in bars since Start). */
+function wig(bars) {
+  if (!S.wiggle) return 1;
+  const ph = (2 * Math.PI * bars) / S.wigBars;
+  const f = S.wigShape === 'smooth' ? Math.sin(ph) : 0.62 * Math.sin(ph) + 0.38 * Math.sin(ph * 2.71 + 1.3);
+  return 1 + (S.wigDepth / 100) * f;
+}
 const info = () => meterInfo(S.beats, S.bottom, S.feel);
 function currentSub(i = info()) {
   const list = subsFor(i);
@@ -50,6 +69,7 @@ export const metronome = {
       <header class="view-head"><h1>Beats</h1><p class="sub">A metronome that grooves. Pick a classic click or a dance beat.</p></header>
       <div class="card metro-card">
         <div class="metro-dots" aria-hidden="true"></div>
+        <div class="poly-dots" aria-hidden="true" hidden></div>
         <div class="metro-bpm-row">
           <button class="btn round" data-bpm="-1" aria-label="Slower">−</button>
           <div class="metro-bpm"><output class="mb-num">${S.bpm}</output><span class="mb-unit"><span class="mb-note"></span> BPM</span><span class="mb-mark">${marking(S.bpm)}</span></div>
@@ -97,6 +117,17 @@ export const metronome = {
         <div class="chips m-groupings"></div>
       </div>
 
+      <div class="card click-only poly-card">
+        <h2>Polyrhythm</h2>
+        <p class="hint">Hear two rhythms at once: the beat, plus a second rhythm spread evenly across each bar.</p>
+        <div class="chips m-polyp">${POLY_PRESETS.map(([a, b]) => `<button class="chip" data-poly="${a}:${b}">${a} against ${b}</button>`).join('')}</div>
+        <div class="row2">
+          <label class="field"><span>Second rhythm</span><select class="m-poly">${[0, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<option value="${n}" ${n === S.poly ? 'selected' : ''}>${n ? `${n} per bar` : 'Off'}</option>`).join('')}</select></label>
+          <label class="field"><span>Hear</span><select class="m-polyhear">${[['both', 'Both'], ['poly', 'Only the second rhythm'], ['main', 'Only the beat']].map(([v, n]) => `<option value="${v}" ${v === S.polyHear ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        </div>
+        <p class="hint m-polyhint"></p>
+      </div>
+
       <div class="card ladder-card">
         <h2>🪜 Accuracy ladder</h2>
         <p class="hint">Play the passage, then tap ✓ if it was clean or ✗ if not. After <b class="lad-nlabel">${S.ladderN}</b> clean in a row the tempo goes up; a miss resets the count. Accuracy first, then speed — what set the most effective practicers apart (Duke, Simmons &amp; Cash, 2009).</p>
@@ -126,6 +157,13 @@ export const metronome = {
           <label class="field"><span>Play bars</span><input type="number" class="m-gplay" min="1" max="16" value="${S.gapPlay}"></label>
           <label class="field"><span>Silent bars</span><input type="number" class="m-gmute" min="1" max="16" value="${S.gapMute}"></label>
         </div>
+        <label class="switch"><input type="checkbox" class="m-wig" ${S.wiggle ? 'checked' : ''}><span><b>Tempo wiggle</b> — the beat drifts faster and slower. Listen and follow it, like playing with a conductor or a singer.</span></label>
+        <div class="wig-opts sub-opts" ${S.wiggle ? '' : 'hidden'}>
+          <label class="field"><span>How much</span><select class="m-wdepth">${[[3, '±3% subtle'], [6, '±6%'], [10, '±10%'], [15, '±15% wild']].map(([v, n]) => `<option value="${v}" ${v === S.wigDepth ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <label class="field"><span>Wave every</span><select class="m-wbars">${[2, 4, 8, 16].map((v) => `<option value="${v}" ${v === S.wigBars ? 'selected' : ''}>${v} bars</option>`).join('')}</select></label>
+          <label class="field"><span>Pattern</span><select class="m-wshape"><option value="smooth" ${S.wigShape === 'smooth' ? 'selected' : ''}>Smooth</option><option value="random" ${S.wigShape === 'random' ? 'selected' : ''}>Unpredictable</option></select></label>
+        </div>
+        <label class="switch wig-hide" ${S.wiggle ? '' : 'hidden'}><input type="checkbox" class="m-whide" ${S.wigHide ? 'checked' : ''}><span>Hide the changing tempo (just listen)</span></label>
         <label class="field"><span>Volume</span><input type="range" class="m-vol" min="0" max="1" step="0.01" value="${S.vol}"></label>
       </div>`;
 
@@ -161,6 +199,23 @@ export const metronome = {
     const num = (cls, key, lo, hi) => $(cls, root).addEventListener('change', (e) => { S[key] = Math.max(lo, Math.min(hi, Number(e.target.value) || lo)); e.target.value = S[key]; persist(); });
     num('.m-tto', 'trainerTo', 30, 260); num('.m-tstep', 'trainerStep', 1, 20); num('.m-tbars', 'trainerBars', 1, 32);
     num('.m-gplay', 'gapPlay', 1, 16); num('.m-gmute', 'gapMute', 1, 16);
+    $('.m-poly', root).addEventListener('change', (e) => setPoly(Number(e.target.value)));
+    $('.m-polyhear', root).addEventListener('change', (e) => { S.polyHear = e.target.value; persist(); renderPoly(); });
+    $$('[data-poly]', root).forEach((b) => b.addEventListener('click', () => {
+      const [a, n] = b.dataset.poly.split(':').map(Number);
+      if (info().pulses !== n) setMeter(n, 4);
+      setPoly(a);
+    }));
+    $('.m-wig', root).addEventListener('change', (e) => {
+      S.wiggle = e.target.checked;
+      $('.wig-opts', root).hidden = !S.wiggle;
+      $('.wig-hide', root).hidden = !S.wiggle;
+      persist();
+    });
+    $('.m-wdepth', root).addEventListener('change', (e) => { S.wigDepth = Number(e.target.value); persist(); });
+    $('.m-wbars', root).addEventListener('change', (e) => { S.wigBars = Number(e.target.value); persist(); });
+    $('.m-wshape', root).addEventListener('change', (e) => { S.wigShape = e.target.value; persist(); });
+    $('.m-whide', root).addEventListener('change', (e) => { S.wigHide = e.target.checked; persist(); });
     $('.m-vol', root).addEventListener('input', (e) => { S.vol = Number(e.target.value); if (out) out.gain.value = S.vol; persist(); });
 
     // keyboard: space toggles, arrows nudge (handy on a laptop in the practice room)
@@ -256,6 +311,28 @@ function renderMeter() {
   $('.mb-note', el).innerHTML = S.mode === 'click' ? noteSvg(i.unit.value, i.unit.dotted) : noteSvg(4);
   drawDots();
   renderGroupings();
+  renderPoly();
+}
+
+function setPoly(n) {
+  S.poly = n;
+  persist();
+  renderPoly();
+}
+
+function renderPoly() {
+  const i = info();
+  const on = S.poly > 0 && S.mode === 'click';
+  const row = $('.poly-dots', el);
+  row.hidden = !on;
+  row.innerHTML = on ? Array.from({ length: S.poly }, (_, k) => `<span class="dot ${k === 0 ? 'acc' : ''}"></span>`).join('') : '';
+  $('.m-poly', el).value = S.poly;
+  $('.m-polyhear', el).value = S.polyHear;
+  $$('[data-poly]', el).forEach((b) => b.classList.toggle('on', b.dataset.poly === `${S.poly}:${i.pulses}`));
+  const voice = polyVoice() === 'beep' ? 'beep' : 'woodblock';
+  $('.m-polyhint', el).innerHTML = on
+    ? `<b>${S.poly} against ${i.pulses}</b>: ${S.poly} evenly spaced ${voice} notes in the time of ${i.pulses} beat${i.pulses > 1 ? 's' : ''}. They line up only on beat 1. Try clapping one rhythm and tapping your foot to the other, then switch — and use <b>Hear</b> to drop one out.${S.poly === 3 && i.pulses === 2 ? ' Say “not dif-fi-cult” to feel 3 against 2.' : ''}`
+    : 'Pick a preset, or choose how many notes the second rhythm plays per bar.';
 }
 const NOTE_WORD = { 8: 'eighths', 16: 'sixteenths', 4: 'quarters' };
 
@@ -376,7 +453,7 @@ function stop() {
   setTimeout(() => old.disconnect(), 300);
   out = null;
   keepAwake('metronome', false);
-  $$('.metro-dots .dot', el).forEach((d) => d.classList.remove('on', 'muted'));
+  $$('.metro-dots .dot, .poly-dots .dot', el).forEach((d) => d.classList.remove('on', 'muted'));
   $('.metro-card', el).dataset.count = '';
   const b = $('.metro-play', el);
   b.classList.remove('active');
@@ -425,10 +502,11 @@ function scheduleClick(c) {
   const snd = S.sound;
   while (nextTime < c.currentTime + LOOKAHEAD) {
     const p = pulseIdx % i.pulses;
-    const pulseDur = 60 / S.bpm;
+    const w = wig(pulseIdx / i.pulses);
+    const pulseDur = 60 / (S.bpm * w);
     const muted = S.gap && (bar % (S.gapPlay + S.gapMute)) >= S.gapPlay;
     const lv = acc[p] ?? 1;
-    if (!muted && lv !== 0) {
+    if (!muted && lv !== 0 && !(S.poly && S.polyHear === 'poly')) {
       const dest = bus();
       for (const f of sub.on) {
         const t = nextTime + f * pulseDur;
@@ -441,7 +519,17 @@ function scheduleClick(c) {
         }
       }
     }
-    visQueue.push({ t: nextTime, beat: p, muted });
+    visQueue.push({ t: nextTime, beat: p, muted, bpm: Math.round(S.bpm * w) });
+    if (S.poly) {
+      // second rhythm: note k sits at k·(beats/poly) beats into the bar
+      for (let k = 0; k < S.poly; k++) {
+        const x = (k * i.pulses) / S.poly;
+        if (x < p || x >= p + 1) continue;
+        const t = nextTime + (x - p) * pulseDur;
+        if (!muted && S.polyHear !== 'main') VOICES[polyVoice()](t, bus(), k === 0 ? 0.9 : 0.75, k === 0);
+        visQueue.push({ t, poly: k });
+      }
+    }
     nextTime += pulseDur;
     pulseIdx++;
     if (pulseIdx % i.pulses === 0) onBarLine();
@@ -453,7 +541,8 @@ function scheduleGroove(c) {
   const stepsPerBeat = groove.steps / groove.beats;
   const stepsPerBar = groove.steps;
   while (nextTime < c.currentTime + LOOKAHEAD) {
-    const stepDur = 60 / S.bpm / stepsPerBeat;
+    const w = wig(step / stepsPerBar);
+    const stepDur = 60 / (S.bpm * w) / stepsPerBeat;
     const inBar = step % stepsPerBar;
     const beat = Math.floor(inBar / stepsPerBeat);
     const onBeat = inBar % stepsPerBeat === 0;
@@ -471,19 +560,25 @@ function scheduleGroove(c) {
       }
       if (S.clickOnGroove && onBeat) VOICES.wood(t, dest, 0.7, beat === 0);
     }
-    if (onBeat) visQueue.push({ t, beat, muted });
+    if (onBeat) visQueue.push({ t, beat, muted, bpm: Math.round(S.bpm * w) });
     nextTime += stepDur;
     step++;
     if (step % stepsPerBar === 0) onBarLine();
   }
 }
 
+let lastWigBpm = 0;
 function drawVis() {
   if (!running) return;
   raf = requestAnimationFrame(drawVis);
   const now = getCtx().currentTime;
   let latest = null;
-  while (visQueue.length && visQueue[0].t <= now) latest = visQueue.shift();
+  let polyHit = null;
+  while (visQueue.length && visQueue[0].t <= now) {
+    const it = visQueue.shift();
+    if (it.poly != null) polyHit = it; else latest = it;
+  }
+  if (polyHit) $$('.poly-dots .dot', el).forEach((d, i) => d.classList.toggle('on', i === polyHit.poly));
   if (!latest) return;
   $('.metro-card', el).dataset.count = latest.count || '';
   const dots = $$('.metro-dots .dot', el);
@@ -494,6 +589,11 @@ function drawVis() {
   const st = $('.metro-status', el);
   const parts = [];
   if (S.gap) parts.push(latest.muted ? '🤫 Silent bar — keep the pulse!' : 'Playing');
+  if (S.wiggle && latest.bpm) {
+    const dir = latest.bpm > lastWigBpm ? '↗' : latest.bpm < lastWigBpm ? '↘' : '→';
+    lastWigBpm = latest.bpm;
+    parts.push(S.wigHide ? '〰 Tempo wiggle — listen and follow' : `〰 Wiggle: ${latest.bpm} BPM ${dir}`);
+  }
   if (S.trainer) parts.push(S.bpm < S.trainerTo ? `Speed trainer: ${S.bpm} → ${S.trainerTo}` : `At target ${S.trainerTo} BPM`);
   st.textContent = parts.join(' · ');
 }

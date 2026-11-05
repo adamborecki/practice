@@ -7,7 +7,7 @@ let levelSink = null;
 let el, mr = null, chunks = [], recStart = 0, recTimer = 0, levelRaf = 0, analyser = null, srcNode = null;
 let list = [];
 let current = null; // { id, audio, url, gain }
-let mode = load('recmode', 'take');
+let mode = load('recmode', 'replay');
 
 function pickMime() {
   const opts = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
@@ -26,8 +26,8 @@ export const recorder = {
     root.innerHTML = `
       <header class="view-head"><h1>Record</h1><p class="sub">Listen back like your audience would. Takes stay on this phone.</p></header>
       <div class="seg small-seg rec-mode" role="tablist">
-        <button role="tab" class="seg-btn" data-rm="take">Record a take</button>
         <button role="tab" class="seg-btn" data-rm="replay">Instant replay</button>
+        <button role="tab" class="seg-btn" data-rm="take">Record a take</button>
       </div>
       <div class="rec-replay-pane"></div>
       <div class="rec-take-pane">

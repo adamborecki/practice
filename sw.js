@@ -1,6 +1,6 @@
 // Offline support: network-first (so updates show up right away), falling back to cache
 // when the practice room has no Wi-Fi.
-const CACHE = 'practice-room-v6';
+const CACHE = 'practice-room-v7';
 const CORE = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
   'js/app.js', 'js/audio.js', 'js/ui.js', 'js/store.js', 'js/pitch.js', 'js/tuner.js', 'js/drums.js',
