@@ -1,11 +1,13 @@
 import { getCtx, acquireMic, releaseMic, micErrorMessage, sinkSilently } from './audio.js';
-import { recordings, addLog } from './store.js';
+import { recordings, addLog, load, save } from './store.js';
+import { mountReplay, hideReplay, boostFor } from './replay.js';
 import { $, $$, esc, fmtClock, fitCanvas, cssVar, keepAwake, toast, icon } from './ui.js';
 
 let levelSink = null;
 let el, mr = null, chunks = [], recStart = 0, recTimer = 0, levelRaf = 0, analyser = null, srcNode = null;
 let list = [];
-let current = null; // { id, audio, url }
+let current = null; // { id, audio, url, gain }
+let mode = load('recmode', 'take');
 
 function pickMime() {
   const opts = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
@@ -23,27 +25,47 @@ export const recorder = {
     el = root;
     root.innerHTML = `
       <header class="view-head"><h1>Record</h1><p class="sub">Listen back like your audience would. Takes stay on this phone.</p></header>
+      <div class="seg small-seg rec-mode" role="tablist">
+        <button role="tab" class="seg-btn" data-rm="take">Record a take</button>
+        <button role="tab" class="seg-btn" data-rm="replay">Instant replay</button>
+      </div>
+      <div class="rec-replay-pane"></div>
+      <div class="rec-take-pane">
       <div class="card rec-card">
         <canvas class="rec-level" aria-hidden="true"></canvas>
         <div class="rec-time">0:00</div>
         <input class="rec-name" placeholder="What are you recording? (optional)" maxlength="80">
         <button class="rec-btn" aria-label="Start recording"><span></span></button>
         <p class="rec-err err" hidden></p>
-        <p class="hint rec-tip">Tip: put the phone a few feet away, not right next to your instrument — you'll hear the room the way a listener does.</p>
+        <p class="hint rec-tip">Tip: put the phone a few feet away, not right next to your instrument — you'll hear the room the way a listener does. Quiet takes are turned up automatically when you play them back.</p>
       </div>
       <div class="card quote-card small">
         <p>Galamian called the ear "the final judge," and warned that most players hear <i>subjectively</i> — what they hope they played. Recordings show what actually happened.</p>
         <p class="cite">Paraphrasing I. Galamian, <i>Principles of Violin Playing &amp; Teaching</i>, “The Critical Ear.”</p>
         <p><b>Try this:</b> listen once for just one thing — intonation, then rhythm, then tone — and mark what needs work on the take.</p>
       </div>
+      </div>
       <div class="rec-list"></div>`;
 
     $('.rec-btn', root).addEventListener('click', () => (mr ? stopRec() : startRec()));
+    mountReplay($('.rec-replay-pane', root), refresh);
+    $$('[data-rm]', root).forEach((b) => b.addEventListener('click', () => setMode(b.dataset.rm)));
+    setMode(mode);
     refresh();
   },
   show() { refresh(); },
-  hide() {},
+  hide() { hideReplay(); },
 };
+
+function setMode(m) {
+  if (mr && m !== 'take') return toast('Stop the recording first');
+  if (m !== 'replay') hideReplay();
+  mode = m;
+  save('recmode', m);
+  $$('[data-rm]', el).forEach((b) => { b.classList.toggle('on', b.dataset.rm === m); b.setAttribute('aria-selected', b.dataset.rm === m); });
+  $('.rec-take-pane', el).hidden = m !== 'take';
+  $('.rec-replay-pane', el).hidden = m !== 'replay';
+}
 
 async function startRec() {
   const err = $('.rec-err', el);
@@ -112,9 +134,11 @@ async function saveTake() {
     star: false,
     note: '',
   };
-  let peaks = [];
-  try { peaks = await computePeaks(blob); } catch {}
-  rec.peaks = peaks;
+  try {
+    const { peaks, max } = await computePeaks(blob);
+    rec.peaks = peaks;
+    rec.peakLevel = max;
+  } catch { rec.peaks = []; }
   try {
     await recordings.put(rec);
   } catch (e) {
@@ -142,7 +166,7 @@ async function computePeaks(blob, n = 120) {
     peaks.push(Math.round(m * 1000) / 1000);
   }
   const max = Math.max(...peaks, 0.01);
-  return peaks.map((p) => Math.round((p / max) * 100) / 100);
+  return { peaks: peaks.map((p) => Math.round((p / max) * 100) / 100), max };
 }
 
 function drawLevel() {
@@ -230,6 +254,7 @@ async function refresh() {
 function stopPlayback() {
   if (!current) return;
   current.audio.pause();
+  try { current.src.disconnect(); current.gain.disconnect(); } catch {}
   URL.revokeObjectURL(current.url);
   current = null;
   $$('.take', el).forEach((c) => { c.classList.remove('playing'); $('.take-play', c).innerHTML = icon('play'); });
@@ -246,7 +271,22 @@ function togglePlay(r, card, startFrac = 0) {
   const audio = new Audio(url);
   audio.preservesPitch = true;
   audio.playbackRate = Number($('.take-rate', card).value);
-  current = { id: r.id, audio, url };
+  // Route through Web Audio so quiet takes (phone mics with auto-gain off record low)
+  // can be brought up to a normal listening level.
+  const c = getCtx();
+  const src = c.createMediaElementSource(audio);
+  const gain = c.createGain();
+  gain.gain.value = boostFor(r.peakLevel);
+  src.connect(gain).connect(c.destination);
+  current = { id: r.id, audio, url, src, gain };
+  if (r.peakLevel == null) {
+    // older takes: measure once, then remember
+    computePeaks(r.blob).then(({ max }) => {
+      r.peakLevel = max;
+      recordings.put(r);
+      if (current?.id === r.id) gain.gain.setTargetAtTime(boostFor(max), c.currentTime, 0.05);
+    }).catch(() => {});
+  }
   card.classList.add('playing');
   $('.take-play', card).innerHTML = icon('pause');
   const pos = $('.take-pos', card);

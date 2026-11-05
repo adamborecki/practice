@@ -652,3 +652,35 @@ body.touring #now-playing { display: none; }
   .quote-card.revealing .qw { animation: qcFade 1.6s ease forwards; animation-delay: 0.3s; }
   .quote-card.revealing { animation: none; }
 }
+
+/* ---------- v6: instant replay ---------- */
+.rec-mode { margin-top: 0; }
+.rp-card { text-align: center; }
+.rp-orb { --lv: 0; position: relative; width: 160px; height: 160px; margin: 4px auto 10px; }
+.rp-orb::before, .rp-orb i { content: ""; position: absolute; border-radius: 50%; }
+.rp-orb::before { inset: 0; background: var(--surface-2); border: 2px solid var(--line); transition: border-color 0.3s; }
+.rp-orb i { inset: 24%; background: var(--muted); opacity: 0.3; transform: scale(calc(0.7 + var(--lv) * 0.9)); transition: transform 90ms linear, background 0.3s, opacity 0.3s; }
+.rp-card[data-state="listening"] .rp-orb::before { animation: rpBreath 2.6s ease-in-out infinite; }
+.rp-card[data-state="listening"] .rp-orb i { background: var(--accent); opacity: 0.5; }
+.rp-card[data-state="capturing"] .rp-orb::before { border-color: var(--bad); }
+.rp-card[data-state="capturing"] .rp-orb i { background: var(--bad); opacity: 0.95; }
+.rp-card[data-state="playing"] .rp-orb::before { border-color: var(--good); }
+.rp-card[data-state="playing"] .rp-orb i { background: var(--good); opacity: 0.9; }
+.rp-card[data-state="waiting"] .rp-orb i { opacity: 0.2; }
+@keyframes rpBreath { 50% { transform: scale(1.045); } }
+.rp-status b { display: block; font-size: 1.5rem; }
+.rp-status small { display: block; color: var(--muted); min-height: 1.3em; margin: 2px 0 12px; font-variant-numeric: tabular-nums; }
+.rp-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; margin-top: 12px; text-align: left; }
+.fx-label { font-weight: 600; font-size: 0.85rem; color: var(--muted); margin: 0.6rem 0 0; }
+.fx-mix { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; color: var(--muted); }
+.fx-mix input { flex: 1; }
+.rp-ph-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.rp-ph-head h2 { margin: 0; }
+.phrase { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.phrase .ph-play { width: 42px; height: 42px; flex: none; font-size: 1rem; }
+.ph-mid { flex: 1; min-width: 0; }
+.ph-mid small { color: var(--muted); font-size: 0.78rem; }
+.ph-wave { display: flex; align-items: center; gap: 1px; height: 26px; margin-top: 3px; }
+.ph-wave i { flex: 1; background: var(--line); border-radius: 1px; min-height: 2px; }
+.phrase.playing .ph-wave i { background: var(--good); }
+@media (prefers-reduced-motion: reduce) { .rp-card[data-state="listening"] .rp-orb::before { animation: none; } }
