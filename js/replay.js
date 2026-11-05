@@ -511,3 +511,6 @@ export function hideReplay() {
   stopSession();
   stopPlay();
 }
+
+/** The concert-hall impulse response, shared with the Breathe soundscape. */
+export const hallImpulse = () => impulse();
