@@ -65,14 +65,19 @@ function render() {
   el.innerHTML = `
     <header class="view-head today-head">
       <div>
-        <p class="eyebrow">${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+        <p class="app-name">Chapman Practice App</p>
         <h1>${greeting()}</h1>
+        <p class="today-date">${d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</p>
       </div>
       <div class="streak" title="Days in a row with logged practice"></div>
     </header>
 
-    <figure class="card quote-card">
-      <blockquote>${esc(q.q)}</blockquote>
+    <figure class="card quote-card ${load('quoteSeen', '') === todayKey() ? 'shown' : 'veiled'}">
+      <button class="quote-reveal" type="button">
+        <span class="qr-star" aria-hidden="true">✦</span>
+        <span class="qr-text">Tap here to reveal today’s inspirational quote</span>
+      </button>
+      <blockquote>${q.q.split(/\s+/).map((w, i) => `<span class="qw" style="--i:${i}">${esc(w)}</span>`).join(' ')}</blockquote>
       <figcaption>— ${esc(q.a)}${q.src ? `, <i>${esc(q.src)}</i>` : ''}${q.attributed ? ' <span class="tag">attributed</span>' : ''}</figcaption>
     </figure>
 
@@ -116,6 +121,13 @@ function render() {
       <a href="#report">${icon('report')}<span>Teacher report</span></a>
     </nav>`;
 
+  const qc = $('.quote-card', el);
+  $('.quote-reveal', qc).addEventListener('click', () => revealQuote(qc));
+  qc.addEventListener('click', (e) => {
+    // tapping again while it unfolds shows the rest at once
+    if (qc.classList.contains('revealing') && !e.target.closest('.quote-reveal')) qc.classList.replace('revealing', 'shown');
+  });
+
   $$('[data-qt]', el).forEach((b) => b.addEventListener('click', () => startQuick(Number(b.dataset.qt))));
   $('.qt-go', el).addEventListener('click', () => {
     const m = Number($('.qt-custom', el).value);
@@ -132,6 +144,23 @@ function render() {
   renderQuick();
   renderTip();
   renderNextConcert();
+}
+
+/**
+ * Unveil the quote slowly: each word drifts up out of a blur, one after another,
+ * over roughly eight seconds; then the author fades in.
+ */
+function revealQuote(card) {
+  if (!card.classList.contains('veiled')) return;
+  const words = $$('.qw', card).length;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const step = reduce ? 0 : Math.max(170, Math.min(520, 6500 / words));
+  card.style.setProperty('--step', `${step}ms`);
+  card.style.setProperty('--capd', `${900 + step * words + 1500}ms`);
+  card.classList.replace('veiled', 'revealing');
+  save('quoteSeen', todayKey());
+  const total = 900 + step * words + 2400 + 1800;
+  setTimeout(() => { if (card.classList.contains('revealing')) card.classList.replace('revealing', 'shown'); }, total);
 }
 
 function greeting() {
