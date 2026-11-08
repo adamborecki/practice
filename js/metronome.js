@@ -1,5 +1,5 @@
 import { getCtx, getMaster, createTicker, LOOKAHEAD } from './audio.js';
-import { VOICES, GROOVES, DANCE_GROOVES, stepVel } from './drums.js';
+import { VOICES, GROOVES, DANCE_GROOVES, stepVel, FILLS, FILL_NAMES } from './drums.js';
 import { load, save, addLog } from './store.js';
 import { meterInfo, subsFor, defaultAccents, noteSvg, unitName, TS_PRESETS } from './meter.js';
 import { $, $$, keepAwake, setPlaying, icon, toast } from './ui.js';
@@ -26,6 +26,10 @@ S.wigDepth ||= 6;
 S.wigBars ||= 8;
 S.wigShape ||= 'smooth';
 S.wigHide ??= false;
+// Auto style: a new groove every STYLE_BARS bars (same tempo), with fills and swells into each change.
+S.autoStyle ??= false;
+S.fills ??= true;
+const STYLE_BARS = 16;
 const POLY_PRESETS = [[3, 2], [2, 3], [4, 3], [3, 4], [5, 4], [5, 3], [7, 4], [5, 2]];
 const polyVoice = () => (S.sound === 'beep' ? 'wood' : 'beep');
 
@@ -56,7 +60,7 @@ Object.assign(S, { ladderN: S.ladderN || 3, ladderStep: S.ladderStep || 4, ladde
 const MARKINGS = [[40, 'Grave'], [60, 'Largo'], [66, 'Larghetto'], [76, 'Adagio'], [108, 'Andante'], [120, 'Moderato'], [156, 'Allegro'], [176, 'Vivace'], [200, 'Presto'], [999, 'Prestissimo']];
 const marking = (b) => MARKINGS.find(([max]) => b < max)[1];
 
-let el, out, running = false, nextTime = 0, step = 0, bar = 0, pulseIdx = 0, countLeft = 0, startedAt = 0, startBpm = 0;
+let el, out, running = false, nextTime = 0, stepInBar = 0, styleBar = 0, barPlan = null, bar = 0, pulseIdx = 0, countLeft = 0, startedAt = 0, startBpm = 0;
 const visQueue = [];
 let raf = 0;
 const ticker = createTicker(schedule);
@@ -91,6 +95,8 @@ export const metronome = {
           <button class="groove ${S.mode === 'click' ? 'on' : ''}" data-mode="click"><span class="ge">🕰️</span><span>Classic click</span></button>
           ${DANCE_GROOVES.map((g) => `<button class="groove ${S.mode === g ? 'on' : ''}" data-mode="${g}"><span class="ge">${GROOVES[g].emoji}</span><span>${GROOVES[g].name}</span><small>~${GROOVES[g].bpm}</small></button>`).join('')}
         </div>
+        <label class="switch"><input type="checkbox" class="m-auto" ${S.autoStyle ? 'checked' : ''}><span><b>Auto style</b> — a new groove every ${STYLE_BARS} bars, same tempo</span></label>
+        <label class="switch indent m-fills-row" ${S.autoStyle ? '' : 'hidden'}><input type="checkbox" class="m-fills" ${S.fills ? 'checked' : ''}><span>🥁 Fills &amp; swells</span></label>
         <label class="switch groove-only"><input type="checkbox" class="m-clickover" ${S.clickOnGroove ? 'checked' : ''}><span>Keep a click on every beat over the groove</span></label>
         <button class="btn small m-usebpm groove-only">Use this groove's typical tempo</button>
       </div>
@@ -173,6 +179,13 @@ export const metronome = {
     $('.tap', root).addEventListener('click', tap);
     $$('[data-mode]', root).forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
     $('.m-usebpm', root).addEventListener('click', () => S.mode !== 'click' && setBpm(GROOVES[S.mode].bpm));
+    $('.m-auto', root).addEventListener('change', (e) => {
+      S.autoStyle = e.target.checked;
+      $('.m-fills-row', root).hidden = !S.autoStyle;
+      persist();
+      if (S.autoStyle && S.mode === 'click') setMode(nextStyle());
+    });
+    $('.m-fills', root).addEventListener('change', (e) => { S.fills = e.target.checked; persist(); });
     $('.m-clickover', root).addEventListener('change', (e) => { S.clickOnGroove = e.target.checked; persist(); });
     $('.m-beats', root).addEventListener('change', (e) => setMeter(Number(e.target.value), S.bottom));
     $('.m-bottom', root).addEventListener('change', (e) => setMeter(S.beats, Number(e.target.value)));
@@ -343,7 +356,7 @@ function setMode(m) {
   reflectMode();
   renderMeter();
   if (running) {
-    step = 0; bar = 0; pulseIdx = 0; nextTime = getCtx().currentTime + 0.05;
+    stepInBar = 0; styleBar = 0; barPlan = null; bar = 0; pulseIdx = 0; nextTime = getCtx().currentTime + 0.05;
     setPlaying('metronome', playingLabel(), stop);
   }
 }
@@ -424,7 +437,9 @@ function start() {
   const c = getCtx();
   bus();
   running = true;
-  step = 0;
+  stepInBar = 0;
+  styleBar = 0;
+  barPlan = null;
   bar = 0;
   pulseIdx = 0;
   nextTime = c.currentTime + 0.08;
@@ -536,34 +551,100 @@ function scheduleClick(c) {
   }
 }
 
+// ---------- auto style ----------
+// Shuffle bag: every groove with the same beats per bar plays once before any repeats.
+let bag = [];
+function nextStyle() {
+  const beats = S.mode === 'click' ? 4 : GROOVES[S.mode].beats;
+  const pool = DANCE_GROOVES.filter((g) => GROOVES[g].beats === beats && g !== S.mode);
+  if (!pool.length) return S.mode === 'click' ? DANCE_GROOVES[0] : S.mode;
+  bag = bag.filter((g) => pool.includes(g));
+  if (!bag.length) bag = pool.slice().sort(() => Math.random() - 0.5);
+  return bag.shift();
+}
+
+function switchStyle(m) {
+  S.mode = m;
+  $$('[data-mode]', el).forEach((x) => x.classList.toggle('on', x.dataset.mode === m));
+  persist();
+  renderMeter();
+  setPlaying('metronome', playingLabel(), stop);
+}
+
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+/** What extra happens in this bar: a fill over its last beats, a swell into the next bar, a crash on its downbeat. */
+function planBar(groove) {
+  const half = STYLE_BARS / 2;
+  const plan = { fill: null, fillBeats: 0, swellBeats: 0, crash: 0 };
+  if (!S.autoStyle || !S.fills) return plan;
+  const bi = styleBar % STYLE_BARS;
+  if (bi === 0 && styleBar > 0) plan.crash = 1; // first bar of a new style
+  if (bi === half) plan.crash = 0.6;
+  if (bi === STYLE_BARS - 1) {
+    // into the change: a whole-bar swell plus a two-beat fill
+    plan.swellBeats = groove.beats;
+    plan.fillBeats = Math.min(2, groove.beats);
+    plan.fill = pick(FILL_NAMES);
+  } else if (bi === half - 1) {
+    // halfway: a short fill or a short swell
+    if (Math.random() < 0.5) { plan.fillBeats = 1; plan.fill = pick(['roll', 'toms']); } else plan.swellBeats = 2;
+  }
+  return plan;
+}
+
 function scheduleGroove(c) {
-  const groove = GROOVES[S.mode];
-  const stepsPerBeat = groove.steps / groove.beats;
-  const stepsPerBar = groove.steps;
   while (nextTime < c.currentTime + LOOKAHEAD) {
-    const w = wig(step / stepsPerBar);
-    const stepDur = 60 / (S.bpm * w) / stepsPerBeat;
-    const inBar = step % stepsPerBar;
-    const beat = Math.floor(inBar / stepsPerBeat);
-    const onBeat = inBar % stepsPerBeat === 0;
+    const groove = GROOVES[S.mode];
+    const stepsPerBar = groove.steps;
+    const spb = stepsPerBar / groove.beats;
+    const inBar = stepInBar;
+    if (inBar === 0 || !barPlan) barPlan = planBar(groove);
+    const w = wig(bar + inBar / stepsPerBar);
+    const stepDur = 60 / (S.bpm * w) / spb;
+    const beat = Math.floor(inBar / spb);
+    const onBeat = inBar % spb === 0;
     const muted = S.gap && (bar % (S.gapPlay + S.gapMute)) >= S.gapPlay;
+    const fillSteps = barPlan.fillBeats * spb;
+    const fillK = fillSteps ? inBar - (stepsPerBar - fillSteps) : -1;
     let t = nextTime;
     if (groove.swing && inBar % 2 === 1) t += groove.swing * stepDur;
     if (!muted) {
       const dest = bus();
-      for (const [voice, pattern] of Object.entries(groove.tracks)) {
-        const ch = pattern[inBar];
-        const v = stepVel(ch);
-        if (!v) continue;
-        VOICES[voice](t, dest, v);
-        if (ch === 'r') VOICES[voice](t + stepDur / 2, dest, v * 0.8);
+      if (fillK >= 0) {
+        for (const [voice, v, arg] of FILLS[barPlan.fill](fillK, fillSteps, spb)) VOICES[voice](t, dest, v, arg);
+      } else {
+        for (const [voice, pattern] of Object.entries(groove.tracks)) {
+          const ch = pattern[inBar];
+          const v = stepVel(ch);
+          if (!v) continue;
+          VOICES[voice](t, dest, v);
+          if (ch === 'r') VOICES[voice](t + stepDur / 2, dest, v * 0.8);
+        }
+      }
+      if (inBar === 0 && barPlan.crash) {
+        VOICES.crash(t, dest, barPlan.crash);
+        if (stepVel(groove.tracks.kick?.[0]) === 0) VOICES.kick(t, dest, 0.8);
+      }
+      if (barPlan.swellBeats && inBar === stepsPerBar - barPlan.swellBeats * spb) {
+        VOICES.swell(t, dest, 0.9, barPlan.swellBeats * spb * stepDur);
       }
       if (S.clickOnGroove && onBeat) VOICES.wood(t, dest, 0.7, beat === 0);
     }
-    if (onBeat) visQueue.push({ t, beat, muted, bpm: Math.round(S.bpm * w) });
+    if (onBeat) visQueue.push({ t, beat, muted, bpm: Math.round(S.bpm * w), styleBar });
     nextTime += stepDur;
-    step++;
-    if (step % stepsPerBar === 0) onBarLine();
+    stepInBar++;
+    if (stepInBar >= stepsPerBar) {
+      stepInBar = 0;
+      barPlan = null;
+      onBarLine();
+      if (S.autoStyle) {
+        styleBar++;
+        if (styleBar % STYLE_BARS === 0) {
+          const next = nextStyle();
+          if (next !== S.mode) switchStyle(next);
+        }
+      }
+    }
   }
 }
 
@@ -593,6 +674,10 @@ function drawVis() {
     const dir = latest.bpm > lastWigBpm ? '↗' : latest.bpm < lastWigBpm ? '↘' : '→';
     lastWigBpm = latest.bpm;
     parts.push(S.wigHide ? '〰 Tempo wiggle — listen and follow' : `〰 Wiggle: ${latest.bpm} BPM ${dir}`);
+  }
+  if (S.autoStyle && S.mode !== 'click' && latest.styleBar != null) {
+    const left = STYLE_BARS - (latest.styleBar % STYLE_BARS);
+    parts.push(`🔀 ${GROOVES[S.mode].name} · new style in ${left} bar${left === 1 ? '' : 's'}`);
   }
   if (S.trainer) parts.push(S.bpm < S.trainerTo ? `Speed trainer: ${S.bpm} → ${S.trainerTo}` : `At target ${S.trainerTo} BPM`);
   st.textContent = parts.join(' · ');

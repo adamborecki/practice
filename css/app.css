@@ -124,6 +124,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 0; accent-color:
 .field.inline select { width: auto; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .switch { display: flex; gap: 0.65rem; align-items: center; margin: 0.55rem 0; font-size: 0.93rem; cursor: pointer; }
+.switch.indent { padding-left: 2rem; }
 .stepper { display: flex; align-items: center; gap: 6px; }
 .stepper output { flex: 1; text-align: center; font-weight: 700; color: var(--text); font-size: 1rem; font-variant-numeric: tabular-nums; }
 .sub-opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding-left: 2rem; }

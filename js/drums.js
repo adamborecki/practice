@@ -138,16 +138,41 @@ export const VOICES = {
     bp.connect(g).connect(dest);
     env(g, t, 0.35 * vel, 0.001, 0.3);
   },
-  tom(t, dest, vel = 1) {
+  tom(t, dest, vel = 1, freq = 140) {
     const c = getCtx();
     const o = c.createOscillator();
-    o.frequency.setValueAtTime(140, t);
-    o.frequency.exponentialRampToValueAtTime(90, t + 0.25);
+    o.frequency.setValueAtTime(freq, t);
+    o.frequency.exponentialRampToValueAtTime(freq * 0.64, t + 0.25);
     const g = c.createGain();
     o.connect(g).connect(dest);
     env(g, t, 0.7 * vel, 0.002, 0.3);
     o.start(t);
     o.stop(t + 0.4);
+  },
+  crash(t, dest, vel = 1) {
+    metallic(t, dest, vel * 0.8, 1.6, 4200, 46);
+    const c = getCtx();
+    const n = noise(t, 1.5);
+    const g = c.createGain();
+    n.connect(filt('highpass', 5200)).connect(g).connect(dest);
+    env(g, t, 0.3 * vel, 0.003, 1.4);
+  },
+  /** Rising "whoosh" of filtered noise that ends right on time `t + dur` (the next downbeat). */
+  swell(t, dest, vel = 1, dur = 2) {
+    const c = getCtx();
+    const s = c.createBufferSource();
+    s.buffer = getNoise();
+    s.loop = true;
+    const f = filt('bandpass', 400, 0.9);
+    f.frequency.setValueAtTime(400, t);
+    f.frequency.exponentialRampToValueAtTime(9000, t + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.32 * vel, t + dur);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.02);
+    s.connect(f).connect(g).connect(dest);
+    s.start(t, Math.random());
+    s.stop(t + dur + 0.05);
   },
   /** Long 808-style sub bass hit. */
   sub(t, dest, vel = 1, freq = 49) {
@@ -371,3 +396,17 @@ export const GROOVES = {
 
 /** Groove choices offered on the metronome screen (all the dance-y ones). */
 export const DANCE_GROOVES = ['house', 'disco', 'hiphop', 'trap', 'reggaeton', 'funk', 'afrobeats', 'dnb', 'rock', 'pop', 'swing', 'bossa', 'reggae', 'lofi', 'waltz'];
+
+
+// ---- fills ----
+// A fill covers the last `n` steps of a bar. Each pattern returns the hits for step k of n
+// (spb = steps per beat, so the same pattern works on 16th, triplet and 3/4 grids).
+const tomPitch = (k, n) => 240 * Math.pow(0.42, n > 1 ? k / (n - 1) : 0);
+const rise = (k, n) => 0.35 + 0.65 * (n > 1 ? k / (n - 1) : 1);
+export const FILLS = {
+  roll: (k, n) => [['snare', rise(k, n)]],
+  toms: (k, n, spb) => [['tom', 0.85, tomPitch(k, n)], ...(k % spb === 0 ? [['kick', 0.8]] : [])],
+  snareToms: (k, n, spb) => (k < n / 2 ? [['snare', 0.55 + 0.3 * (k % 2)]] : FILLS.toms(k - n / 2, n / 2, spb)),
+  build: (k, n, spb) => (k < n / 2 ? (k % Math.max(1, spb / 2) === 0 ? [['snare', rise(k, n)]] : []) : [['snare', rise(k, n)]]),
+};
+export const FILL_NAMES = Object.keys(FILLS);
